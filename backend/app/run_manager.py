@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import signal
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -17,6 +19,7 @@ class RunManager:
         self._tasks: dict[UUID, asyncio.Task] = {}
         self._procs: dict[UUID, asyncio.subprocess.Process] = {}
         self._subscribers: dict[UUID, list[asyncio.Queue[str]]] = defaultdict(list)
+        self._stop_requested: set[UUID] = set()
 
     def build_command(self, action: str, extra_args: list[str]) -> list[str]:
         scripts_dir = Path(settings.scripts_dir)
@@ -103,6 +106,7 @@ class RunManager:
                 cwd=settings.scripts_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
             )
             self._procs[run_id] = proc
             assert proc.stdout is not None
@@ -115,7 +119,10 @@ class RunManager:
             rc = await proc.wait()
             if action == "benchmark" and rc == 0:
                 self._maybe_store_benchmark(run_id, output_lines)
+            stopped_by_user = run_id in self._stop_requested
             status = "success" if rc == 0 else "failed"
+            if stopped_by_user:
+                status = "stopped"
             self.store.update_run(run_id, status=status, exit_code=rc)
             self.store.append_event(run_id, "info", f"[done] exit_code={rc}")
             await self._publish(run_id, f"[done] exit_code={rc}")
@@ -132,12 +139,22 @@ class RunManager:
         finally:
             self._tasks.pop(run_id, None)
             self._procs.pop(run_id, None)
+            self._stop_requested.discard(run_id)
 
     async def stop(self, run_id: UUID) -> bool:
         proc = self._procs.get(run_id)
         if proc is not None and proc.returncode is None:
-            proc.terminate()
-            self.store.append_event(run_id, "info", "[terminate sent]")
+            self._stop_requested.add(run_id)
+            try:
+                # The run command is launched in a dedicated session so this signal
+                # reaches the wrapper and any spawned server subprocesses.
+                os.killpg(proc.pid, signal.SIGTERM)
+                self.store.append_event(run_id, "info", "[terminate group sent]")
+            except ProcessLookupError:
+                self.store.append_event(run_id, "info", "[process already exited]")
+            except Exception:
+                proc.terminate()
+                self.store.append_event(run_id, "info", "[terminate sent]")
             return True
         task = self._tasks.get(run_id)
         if task and not task.done():
