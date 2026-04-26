@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "bash ./scripts/dev-with-backend.sh",
+    "dev:frontend": "vite",
+    "dev:full": "bash ./scripts/dev-with-backend.sh",
     "build": "vite build",
     "preview": "vite preview"
   },
