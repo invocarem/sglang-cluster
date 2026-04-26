@@ -19,3 +19,23 @@ vi config.sh  # Set MASTER_NODE and WORKER_NODE
 ./setup.sh stop     # Stop everything
 
 ```
+
+### Web UI scaffold
+
+Backend:
+
+```
+cd ~/sglang-cluster/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m app.main
+```
+
+Frontend:
+
+```
+cd ~/sglang-cluster/frontend
+npm install
+npm run dev
+```
